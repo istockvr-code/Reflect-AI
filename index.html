@@ -358,52 +358,94 @@ function BluetoothPanel({ onClose, onConnect }) {
 // ASK A QUESTION — CHAT WITH CLARITY AI
 // ---------------------------------------------------------------------------
 
-const MOCK_REPLIES = [
-  "Looking back at last week, finances came up twice and both times the conversation ended with a plan to revisit the numbers together. That seems to be a pattern worth noticing.",
-  "Evenings after 9 PM tend to be when conversations land more gently — Tuesday's wind-down chat is a good example of that.",
-  "I don't see that topic come up directly in recent conversations. Want me to look further back?",
-];
+// ---------------------------------------------------------------------------
+// CLARITY AI — growth coach response engine
+// ---------------------------------------------------------------------------
+
+function generateClarityResponse(userMsg, real) {
+  const lower = userMsg.toLowerCase();
+  const allText = real.map((c) => c.transcript).join(" ");
+
+  // Tone counts
+  const tones = real.map((c) => c.tone);
+  const tenseCount = tones.filter((t) => t === "tense").length;
+  const warmCount = tones.filter((t) => t === "warm").length;
+  const dominant = tenseCount > warmCount ? "tense" : warmCount > 0 ? "warm" : "calm";
+
+  // Top words (excluding stop words)
+  const stop = new Set(["the","a","an","is","it","to","of","and","in","that","was","for","on","are","with","as","at","be","this","have","from","or","but","not","what","all","were","when","we","i","you","he","she","they","them","their","our","can","will","would","could","should","just","so","if","my","your","his","her","its","do","did","got","get","think","know","like","really","yeah","okay","well","um","uh"]);
+  const freq = {};
+  allText.toLowerCase().split(/\s+/).forEach((w) => {
+    const c = w.replace(/[^a-z]/g, "");
+    if (c.length > 3 && !stop.has(c)) freq[c] = (freq[c] || 0) + 1;
+  });
+  const topWords = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([w]) => w);
+
+  // Most relevant sentences to the question
+  const keywords = lower.split(/\s+/).filter((w) => w.length > 3 && !stop.has(w));
+  const allSentences = real.flatMap((c) =>
+    c.transcript.split(/[.!?]+/).map((s) => s.trim()).filter((s) => s.length > 10).map((s) => ({ text: s, conv: c }))
+  );
+  const relevant = allSentences
+    .map((s) => ({ ...s, score: keywords.reduce((n, kw) => n + (s.text.toLowerCase().includes(kw) ? 1 : 0), 0) }))
+    .filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
+
+  // — Response logic —
+
+  if (/how am i|overall|summary|overview|doing/.test(lower)) {
+    const toneDesc = dominant === "tense" ? "some tension running through them"
+      : dominant === "warm" ? "a lot of warmth and openness" : "a generally calm, steady tone";
+    return `Across ${real.length} recording${real.length !== 1 ? "s" : ""}, I notice ${toneDesc} in how you communicate.\n\nTopics that come up most: ${topWords.slice(0, 3).join(", ")}. ${tenseCount > 0 ? `${tenseCount} session${tenseCount !== 1 ? "s" : ""} had noticeable friction — worth sitting with.` : "The energy has felt fairly settled."}\n\nWhat feels most on your mind right now?`;
+  }
+
+  if (/grow|improve|better|work on|change|develop/.test(lower)) {
+    if (tenseCount > 0) {
+      const t = real.find((c) => c.tone === "tense");
+      const snippet = t ? t.transcript.split(/\s+/).slice(0, 10).join(" ") : "";
+      return `One thing I notice is that tension tends to surface in your conversations — ${snippet ? `like when you said "${snippet}..."` : "in a few of your sessions"}.\n\nThe question worth exploring: when that friction comes up, are you staying curious or getting defensive? Most communication growth lives in that gap.\n\nWhat does tension feel like for you before you even say anything?`;
+    }
+    return `Your conversations have a steady, even tone — which can mean you're grounded, or it can mean something's being held back. Hard to know from sound alone.\n\nOne thing worth reflecting on: are you saying what you actually mean, or softening it to keep the peace? Growth often starts by noticing that habit.\n\nWhat's something you've wanted to say but haven't?`;
+  }
+
+  if (/stress|tension|conflict|difficult|hard|tough|frustrat|angry|upset/.test(lower)) {
+    if (tenseCount > 0) {
+      const t = real.filter((c) => c.tone === "tense")[0];
+      const snippet = t.transcript.split(/\s+/).slice(0, 14).join(" ");
+      return `I can hear it in some of what's been recorded. In one session you said: "${snippet}..." — that kind of language often signals stress that started before the words did.\n\nWhat tends to trigger it for you — specific topics, certain dynamics, or just the accumulation of a long day?\n\nNoticing the pattern is already half the work.`;
+    }
+    return `From what I've heard, your conversations haven't sounded particularly stressed — though that doesn't always mean everything's fine underneath.\n\nWhat's making you ask about this? Sometimes the question itself points to something worth looking at.`;
+  }
+
+  if (/feel|emotion|mood|energy|connect/.test(lower)) {
+    const warmConvs = real.filter((c) => c.tone === "warm");
+    if (warmConvs.length > 0) {
+      return `There are moments of real warmth in your recordings — ${warmConvs.length} session${warmConvs.length !== 1 ? "s" : ""} where the energy felt open and connected.\n\nYou seem most at ease when ${topWords[0] || "certain topics"} come up. Things feel different when it shifts toward ${topWords[1] || "other areas"}.\n\nHow do you feel after most conversations — do you usually know how it went, or does it take a while to land?`;
+    }
+    return `Emotionally, the tone across your recordings is fairly contained — not cold, just measured. That can be a strength or a wall depending on the situation.\n\nWhat emotion do you think comes through most easily for you? And which one do you tend to hold back?`;
+  }
+
+  if (relevant.length > 0) {
+    const { text } = relevant[0];
+    return `Something connected to that came up in one of your recordings: "${text}"\n\nWhat strikes me isn't just what was said, but what it might reflect about how you were showing up in that moment.\n\nWhat does that bring up for you looking back at it?`;
+  }
+
+  // Default growth reflection
+  return `That's worth sitting with. From what I've heard, your conversations touch on ${topWords.slice(0, 3).join(", ")} — and the energy shifts depending on where the conversation goes.\n\nRather than me telling you what I see, I'm curious: what do you think comes through most in how you talk with the people close to you?\n\nThe gap between how we think we come across and how we actually do — that's usually where the growth is.`;
+}
 
 function AskQuestionPanel({ onClose, conversations }) {
   const [messages, setMessages] = useState([
-    { from: "ai", text: "Hi, I'm Clarity. Ask me anything about your past conversations and I'll look through what's been recorded." },
+    { from: "ai", text: "Hi, I'm Clarity. I've been listening to your conversations and I'm here to help you grow from what I've noticed. What's on your mind?" },
   ]);
   const [input, setInput] = useState("");
 
   const send = () => {
     const text = input.trim();
     if (!text) return;
-    let reply;
     const real = (conversations || []).filter((c) => c.transcript && !c.live);
-
-    if (real.length === 0) {
-      reply = "No conversations recorded yet. Start a recording session and I'll be able to reflect on what was said.";
-    } else {
-      const lower = text.toLowerCase();
-      const keywords = lower.split(/\s+/).filter((w) => w.length > 3);
-
-      // Score each conversation by keyword hits in transcript
-      const scored = real.map((c) => {
-        const t = (c.transcript || "").toLowerCase();
-        const score = keywords.reduce((n, kw) => n + (t.includes(kw) ? 1 : 0), 0);
-        return { c, score };
-      }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score);
-
-      if (scored.length > 0) {
-        const { c } = scored[0];
-        // Find the most relevant sentence
-        const sentences = c.transcript.split(/[.!?]+/).map((s) => s.trim()).filter(Boolean);
-        const best = sentences.find((s) =>
-          keywords.some((kw) => s.toLowerCase().includes(kw))
-        ) || sentences[0];
-        reply = `From your recording "${c.title}" (${c.date}):\n\n"${best}"\n\nFull transcript: ${c.transcript.slice(0, 300)}${c.transcript.length > 300 ? "..." : ""}`;
-      } else {
-        // No keyword match — summarize what's there
-        const allText = real.map((c) => c.transcript).join(" ");
-        const preview = allText.slice(0, 400);
-        reply = `I didn't find that specific topic, but here's what I have from your recordings:\n\n"${preview}${allText.length > 400 ? "..." : ""}"`;
-      }
-    }
+    const reply = real.length === 0
+      ? "I haven't heard any conversations yet. Once you start recording, I'll be able to reflect on patterns and help you grow from what I've noticed."
+      : generateClarityResponse(text, real);
     setMessages((m) => [...m, { from: "user", text }, { from: "ai", text: reply }]);
     setInput("");
   };
@@ -444,7 +486,7 @@ function AskQuestionPanel({ onClose, conversations }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-            placeholder="Ask about a past conversation..."
+            placeholder="What's on your mind..."
             style={{
               flex: 1, borderRadius: "14px", border: "1px solid rgba(255,255,255,0.1)",
               background: "rgba(255,255,255,0.03)", padding: "12px 14px",
@@ -853,29 +895,13 @@ function LiveTranscript({ recording, onChunk }) {
     };
   }, [recording]);
 
+  // Only show mic errors — word display removed (live card in the list replaces it)
   if (!recording) return null;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px", minHeight: "44px" }}>
-      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "8px", maxWidth: "320px" }}>
-        {words.length === 0 && (
-          <span style={{ fontSize: "13px", color: "#6F6285" }}>Listening...</span>
-        )}
-        {words.map((w, i) => (
-          <span key={i} style={{
-            fontSize: "14px", color: "#E5DEF5",
-            opacity: 0.35 + (i / Math.max(words.length - 1, 1)) * 0.65,
-            animation: "fadeInUp 0.35s ease-out",
-          }}>
-            {w}
-          </span>
-        ))}
-      </div>
-      {micError && (
-        <span style={{ fontSize: "11px", color: "#8478A0", textAlign: "center", maxWidth: "300px" }}>{micError}</span>
-      )}
+  return micError ? (
+    <div style={{ textAlign: "center" }}>
+      <span style={{ fontSize: "11px", color: "#E08B6E" }}>{micError}</span>
     </div>
-  );
+  ) : null;
 }
 
 function App() {
