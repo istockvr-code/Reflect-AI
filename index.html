@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Reflect</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #060509; }
+  * { box-sizing: border-box; }
+  @keyframes iconPulse {
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.15); }
+  }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState } = React;
+
+// ---------------------------------------------------------------------------
+// ARCHITECTURE NOTE (not implemented in this prototype — UI only)
+//
+// On-device pipeline:
+// 1. Hub idles with a lightweight voice-activity-detection (VAD) model running
+//    continuously on raw audio, locally, with no storage or network calls.
+// 2. When VAD detects a sustained audio change (speech onset), the hub starts
+//    a recording segment.
+// 3. The segment is transcribed locally; only the transcript + emotion tags
+//    are stored/sent for analysis — raw audio for that segment is then
+//    discarded.
+// 4. Recording stops after a period of silence, returning the hub to idle/VAD
+//    mode.
+// This keeps storage and AI token usage proportional to actual conversation
+// time, not 24/7 raw capture.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// ICONS (inline SVG)
+// ---------------------------------------------------------------------------
+
+const Icon = {
+  MessageCircle: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+    </svg>
+  ),
+  Send: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m22 2-7 20-4-9-9-4 20-7z"/>
+    </svg>
+  ),
+  Bluetooth: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m7 7 10 10-5 5V2l5 5L7 17"/>
+    </svg>
+  ),
+  Sparkles: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>
+    </svg>
+  ),
+  Mic: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/>
+    </svg>
+  ),
+  Square: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="4" width="16" height="16" rx="2"/>
+    </svg>
+  ),
+  Search: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/>
+    </svg>
+  ),
+  ShieldCheck: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2 4 5v6c0 5 4 8 8 11 4-3 8-6 8-11V5l-8-3z"/><path d="m9 12 2 2 4-4"/>
+    </svg>
+  ),
+  X: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 6 6 18M6 6l12 12"/>
+    </svg>
+  ),
+  Trash2: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/>
+    </svg>
+  ),
+  Smartphone: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/>
+    </svg>
+  ),
+  Bluetooth2: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m7 7 10 10-5 5V2l5 5L7 17"/>
+    </svg>
+  ),
+  Crown: (p) => (
+    <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m2 7 4 12h12l4-12-6 4-4-6-4 6-6-4z"/>
+    </svg>
+  ),
+  Google: (p) => (
+    <svg {...p} viewBox="0 0 24 24">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.99.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+    </svg>
+  ),
+};
+
+// ---------------------------------------------------------------------------
+// MOCK DATA
+// ---------------------------------------------------------------------------
+
+const MOCK_CONVERSATIONS = [
+  {
+    id: 1,
+    title: "Weekend plans discussion",
+    date: "Today, 7:42 PM",
+    room: "Living Room Hub",
+    theme: "family planning",
+    tone: "resolved",
+    snippet: "...felt like you brushed off what I said about visiting my parents. I didn't mean to...",
+  },
+  {
+    id: 2,
+    title: "Morning catch-up",
+    date: "Today, 8:15 AM",
+    room: "Kitchen Hub",
+    theme: "daily check-in",
+    tone: "warm",
+    snippet: "...did you sleep okay? I kept thinking about the presentation, honestly...",
+  },
+  {
+    id: 3,
+    title: "Budget conversation",
+    date: "Yesterday, 9:03 PM",
+    room: "Living Room Hub",
+    theme: "finances",
+    tone: "tense",
+    snippet: "...I just think we should look at the numbers again before deciding on...",
+  },
+  {
+    id: 4,
+    title: "Evening wind-down",
+    date: "Yesterday, 10:30 PM",
+    room: "Bedroom Hub",
+    theme: "reflection",
+    tone: "calm",
+    snippet: "...it was a good day overall, just tired. I think tomorrow we should...",
+  },
+];
+
+const TONE_GLOW = {
+  resolved: "#9B7FE0",
+  warm: "#C9A8F0",
+  tense: "#E08B6E",
+  calm: "#7FC7E0",
+};
+
+const LEARNING_INSIGHTS = [
+  "You tend to feel most at ease in evening conversations after 9 PM.",
+  "Topics around finances show up with more tension than other themes.",
+  "Conversations that start with a check-in question tend to resolve more gently.",
+];
+
+const SCAN_DEVICES = [
+  { id: "a", name: "Living Room Hub", kind: "Reflect Mic", delay: 600 },
+  { id: "b", name: "Kitchen Hub", kind: "Reflect Mic", delay: 1400 },
+  { id: "c", name: "JBL Clip 4", kind: "Bluetooth audio device", delay: 2200 },
+  { id: "d", name: "AirPods Pro", kind: "Bluetooth audio device", delay: 3000 },
+  { id: "e", name: "Bedroom Hub", kind: "Reflect Mic", delay: 3800 },
+];
+
+// ---------------------------------------------------------------------------
+// BLUETOOTH CONNECT MODAL
+// ---------------------------------------------------------------------------
+
+function BluetoothPanel({ onClose, onConnect }) {
+  const [foundIds, setFoundIds] = useState([]);
+  const [scanning, setScanning] = useState(true);
+
+  React.useEffect(() => {
+    const timers = SCAN_DEVICES.map((d) =>
+      setTimeout(() => setFoundIds((prev) => [...prev, d.id]), d.delay)
+    );
+    const doneTimer = setTimeout(() => setScanning(false), 4400);
+    return () => { timers.forEach(clearTimeout); clearTimeout(doneTimer); };
+  }, []);
+
+  const found = SCAN_DEVICES.filter((d) => foundIds.includes(d.id));
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", padding: "16px" }}>
+      <div style={{ position: "relative", width: "100%", maxWidth: "420px", borderRadius: "24px", border: "1px solid #2E2440", background: "#0E0B16", padding: "24px", boxShadow: "0 0 80px rgba(155,127,224,0.18)" }}>
+        <button onClick={onClose} style={{ position: "absolute", top: "16px", right: "16px", color: "#8C7FA8", background: "none", border: "none", cursor: "pointer" }}>
+          <Icon.X style={{ width: 18, height: 18 }} />
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+          <Icon.Bluetooth2 style={{
+            width: 16, height: 16, color: "#9B7FE0",
+            animation: scanning ? "iconPulse 1.4s ease-in-out infinite" : "none",
+          }} />
+          <span style={{ fontSize: "12px", fontWeight: 500, letterSpacing: "0.2em", color: "#9B7FE0", textTransform: "uppercase" }}>Bluetooth</span>
+        </div>
+        <h2 style={{ fontSize: "20px", fontWeight: 600, color: "#FFFFFF", margin: "8px 0 4px" }}>
+          {scanning ? "Searching for devices" : "Nearby devices"}
+        </h2>
+        <p style={{ fontSize: "13px", color: "#8478A0", margin: "0 0 16px", lineHeight: 1.5 }}>
+          Recording needs a paired microphone. Any Bluetooth audio device works, or pair a
+          Reflect Mic for the best experience.
+        </p>
+
+        <button onClick={() => onConnect({ id: "this-phone", name: "This phone's microphone", kind: "phone", isPhone: true })} style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          borderRadius: "14px", border: "1px solid rgba(155,127,224,0.4)", background: "rgba(155,127,224,0.1)",
+          padding: "14px 16px", color: "#F3EEFF", fontSize: "14px", cursor: "pointer",
+          fontFamily: "inherit", textAlign: "left", marginBottom: "16px",
+          boxShadow: "0 0 20px rgba(155,127,224,0.12)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <Icon.Smartphone style={{ width: 18, height: 18, color: "#C9A8F0" }} />
+            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+              <span>Use this phone's microphone</span>
+              <span style={{ fontSize: "11px", color: "#8478A0" }}>For testing — uses browser mic access</span>
+            </div>
+          </div>
+          <span style={{ fontSize: "12px", color: "#9B7FE0" }}>Connect</span>
+        </button>
+
+        <div style={{ height: "1px", background: "rgba(255,255,255,0.06)", marginBottom: "16px" }} />
+
+        <h3 style={{ fontSize: "11px", fontWeight: 500, letterSpacing: "0.15em", color: "#6F6285", textTransform: "uppercase", margin: "0 0 10px" }}>
+          Nearby Bluetooth devices
+        </h3>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px", minHeight: "56px" }}>
+          {found.length === 0 && scanning && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", padding: "20px 0", color: "#8478A0", fontSize: "13px" }}>
+              <span style={{
+                width: "8px", height: "8px", borderRadius: "50%", background: "#9B7FE0",
+                animation: "iconPulse 1.2s ease-in-out infinite",
+              }} />
+              Scanning...
+            </div>
+          )}
+          {found.map((d) => (
+            <button key={d.id} onClick={() => onConnect(d)} style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              borderRadius: "14px", border: "1px solid #2E2440", background: "#150F22",
+              padding: "14px 16px", color: "#F3EEFF", fontSize: "14px", cursor: "pointer",
+              fontFamily: "inherit", textAlign: "left", transition: "border-color 0.2s",
+              animation: "fadeInUp 0.4s ease-out",
+            }}
+              onMouseEnter={(e) => e.currentTarget.style.borderColor = "#6B4E9E"}
+              onMouseLeave={(e) => e.currentTarget.style.borderColor = "#2E2440"}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                <span>{d.name}</span>
+                <span style={{ fontSize: "11px", color: "#8478A0" }}>{d.kind}</span>
+              </div>
+              <span style={{ fontSize: "12px", color: "#9B7FE0" }}>Connect</span>
+            </button>
+          ))}
+        </div>
+
+        {!scanning && (
+          <button onClick={() => { setFoundIds([]); setScanning(true); }} style={{
+            width: "100%", marginTop: "14px", borderRadius: "14px", border: "1px solid rgba(255,255,255,0.1)",
+            background: "rgba(255,255,255,0.03)", color: "#B6ABCE", fontSize: "13px", fontWeight: 500,
+            padding: "12px", cursor: "pointer", fontFamily: "inherit",
+          }}>
+            Scan again
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ASK A QUESTION — CHAT WITH CLARITY AI
+// ---------------------------------------------------------------------------
+
+const MOCK_REPLIES = [
+  "Looking back at last week, finances came up twice and both times the conversation ended with a plan to revisit the numbers together. That seems to be a pattern worth noticing.",
+  "Evenings after 9 PM tend to be when conversations land more gently — Tuesday's wind-down chat is a good example of that.",
+  "I don't see that topic come up directly in recent conversations. Want me to look further back?",
+];
+
+function AskQuestionPanel({ onClose }) {
+  const [messages, setMessages] = useState([
+    { from: "ai", text: "Hi, I'm Clarity. Ask me anything about your past conversations and I'll look through what's been recorded." },
+  ]);
+  const [input, setInput] = useState("");
+
+  const send = () => {
+    const text = input.trim();
+    if (!text) return;
+    const reply = MOCK_REPLIES[Math.floor(Math.random() * MOCK_REPLIES.length)];
+    setMessages((m) => [...m, { from: "user", text }, { from: "ai", text: reply }]);
+    setInput("");
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", padding: "16px" }}>
+      <div style={{ position: "relative", width: "100%", maxWidth: "440px", height: "min(640px, 85vh)", borderRadius: "24px", border: "1px solid #2E2440", background: "#0E0B16", boxShadow: "0 0 80px rgba(155,127,224,0.18)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 20px 12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Icon.MessageCircle style={{ width: 16, height: 16, color: "#C9A8F0" }} />
+            <span style={{ fontSize: "12px", fontWeight: 500, letterSpacing: "0.2em", color: "#9B7FE0", textTransform: "uppercase" }}>Clarity AI</span>
+          </div>
+          <button onClick={onClose} style={{ color: "#8C7FA8", background: "none", border: "none", cursor: "pointer" }}>
+            <Icon.X style={{ width: 18, height: 18 }} />
+          </button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 20px", display: "flex", flexDirection: "column", gap: "10px" }}>
+          {messages.map((m, i) => (
+            <div key={i} style={{
+              alignSelf: m.from === "user" ? "flex-end" : "flex-start",
+              maxWidth: "85%",
+              borderRadius: "14px",
+              padding: "12px 14px",
+              fontSize: "14px",
+              lineHeight: 1.5,
+              background: m.from === "user" ? "rgba(155,127,224,0.18)" : "rgba(255,255,255,0.04)",
+              border: m.from === "user" ? "1px solid rgba(155,127,224,0.35)" : "1px solid rgba(255,255,255,0.06)",
+              color: m.from === "user" ? "#F3EEFF" : "#E5DEF5",
+            }}>
+              {m.text}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "16px 20px 20px" }}>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") send(); }}
+            placeholder="Ask about a past conversation..."
+            style={{
+              flex: 1, borderRadius: "14px", border: "1px solid rgba(255,255,255,0.1)",
+              background: "rgba(255,255,255,0.03)", padding: "12px 14px",
+              fontSize: "14px", color: "#FFFFFF", outline: "none", fontFamily: "inherit",
+            }}
+            onFocus={(e) => { e.target.style.borderColor = "rgba(155,127,224,0.6)"; }}
+            onBlur={(e) => { e.target.style.borderColor = "rgba(255,255,255,0.1)"; }}
+          />
+          <button onClick={send} aria-label="Send" style={{
+            width: "42px", height: "42px", borderRadius: "12px", flexShrink: 0,
+            border: "1px solid rgba(155,127,224,0.5)", background: "rgba(155,127,224,0.15)",
+            display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+          }}>
+            <Icon.Send style={{ width: 16, height: 16, color: "#C9A8F0" }} />
+          </button>
+        </div>
+
+        <p style={{ fontSize: "11px", color: "#8478A0", textAlign: "center", margin: "0 20px 16px", lineHeight: 1.4 }}>
+          Clarity reflects patterns from your own recorded conversations — it isn't a therapist.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function LearnPanel({ onClose }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", padding: "16px" }}>
+      <div style={{ position: "relative", width: "100%", maxWidth: "440px", borderRadius: "24px", border: "1px solid #2E2440", background: "#0E0B16", padding: "24px", boxShadow: "0 0 80px rgba(155,127,224,0.18)" }}>
+        <button onClick={onClose} style={{ position: "absolute", top: "16px", right: "16px", color: "#8C7FA8", background: "none", border: "none", cursor: "pointer" }}>
+          <Icon.X style={{ width: 18, height: 18 }} />
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+          <Icon.Sparkles style={{ width: 16, height: 16, color: "#C9A8F0" }} />
+          <span style={{ fontSize: "12px", fontWeight: 500, letterSpacing: "0.2em", color: "#9B7FE0", textTransform: "uppercase" }}>Reflections</span>
+        </div>
+        <h2 style={{ fontSize: "20px", fontWeight: 600, color: "#FFFFFF", margin: "8px 0 16px" }}>
+          What your conversations show
+        </h2>
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          {LEARNING_INSIGHTS.map((insight, i) => (
+            <div key={i} style={{ borderRadius: "12px", border: "1px solid #2E2440", background: "#150F22", padding: "14px", fontSize: "14px", color: "#E5DEF5", lineHeight: 1.5 }}>
+              {insight}
+            </div>
+          ))}
+        </div>
+        <p style={{ fontSize: "12px", color: "#8478A0", marginTop: "16px", lineHeight: 1.5 }}>
+          These are patterns, not conclusions. They're meant to prompt your own reflection — not
+          to replace a conversation with a therapist if that's something you're looking for.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SUBSCRIPTION MODAL
+// ---------------------------------------------------------------------------
+
+function SubscriptionPanel({ onClose, connectedDevices, onUnpair }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", padding: "16px" }}>
+      <div style={{ position: "relative", width: "100%", maxWidth: "420px", borderRadius: "24px", border: "1px solid #2E2440", background: "#0E0B16", padding: "24px", boxShadow: "0 0 80px rgba(155,127,224,0.18)" }}>
+        <button onClick={onClose} style={{ position: "absolute", top: "16px", right: "16px", color: "#8C7FA8", background: "none", border: "none", cursor: "pointer" }}>
+          <Icon.X style={{ width: 18, height: 18 }} />
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+          <Icon.Crown style={{ width: 16, height: 16, color: "#C9A8F0" }} />
+          <span style={{ fontSize: "12px", fontWeight: 500, letterSpacing: "0.2em", color: "#9B7FE0", textTransform: "uppercase" }}>Subscription</span>
+        </div>
+        <h2 style={{ fontSize: "20px", fontWeight: 600, color: "#FFFFFF", margin: "8px 0 4px" }}>
+          2 weeks free
+        </h2>
+        <p style={{ fontSize: "13px", color: "#B6ABCE", margin: "0 0 16px", lineHeight: 1.5 }}>
+          Every account starts with 2 weeks of free continuous recording and reflections.
+          After that, it's $19.99 per month to keep listening and storing your home's
+          conversations.
+        </p>
+        <div style={{ borderRadius: "14px", border: "1px solid #2E2440", background: "#150F22", padding: "16px", marginBottom: "16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "6px" }}>
+            <span style={{ fontSize: "14px", color: "#E5DEF5" }}>After trial</span>
+            <span style={{ fontSize: "22px", fontWeight: 600, color: "#FFFFFF" }}>$19.99<span style={{ fontSize: "13px", color: "#8478A0" }}>/mo</span></span>
+          </div>
+          <p style={{ fontSize: "12px", color: "#8478A0", margin: 0, lineHeight: 1.5 }}>
+            Continuous recording, transcription, and reflections. Cancel anytime — your stored
+            history stays under your control either way.
+          </p>
+        </div>
+
+        <div style={{ marginBottom: "16px" }}>
+          <h3 style={{ fontSize: "12px", fontWeight: 500, letterSpacing: "0.1em", color: "#8478A0", textTransform: "uppercase", margin: "0 0 8px" }}>
+            Connected devices
+          </h3>
+          {connectedDevices && connectedDevices.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {connectedDevices.map((d) => (
+                <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderRadius: "12px", border: "1px solid #2E2440", background: "#150F22", padding: "12px 14px" }}>
+                  <span style={{ fontSize: "13px", color: "#E5DEF5" }}>{d.name}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span style={{ fontSize: "11px", color: "#7FC7E0" }}>Paired</span>
+                    <button onClick={() => onUnpair(d.id)} style={{
+                      fontSize: "11px", color: "#E0B0C0", background: "none", border: "none",
+                      cursor: "pointer", padding: 0, fontFamily: "inherit", textDecoration: "underline",
+                      textDecorationColor: "rgba(224,176,192,0.4)",
+                    }}>
+                      Unpair
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ borderRadius: "12px", border: "1px dashed #2E2440", padding: "14px", fontSize: "12px", color: "#8478A0", textAlign: "center" }}>
+              No microphones paired yet.
+            </div>
+          )}
+        </div>
+
+        <button style={{
+          width: "100%", borderRadius: "14px", border: "1px solid rgba(155,127,224,0.5)",
+          background: "rgba(155,127,224,0.15)", color: "#FFFFFF", fontSize: "14px", fontWeight: 500,
+          padding: "14px", cursor: "pointer", fontFamily: "inherit",
+          boxShadow: "0 0 24px rgba(155,127,224,0.25)",
+        }}>
+          Start free trial
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+
+function ControlButton({ icon: IconComp, label, onClick, active }) {
+  const baseStyle = {
+    display: "flex", alignItems: "center", gap: "12px", borderRadius: "16px",
+    border: "1px solid", padding: "16px 20px", width: "100%", textAlign: "left",
+    cursor: "pointer", transition: "all 0.3s", fontFamily: "inherit",
+    background: "rgba(255,255,255,0.03)", backdropFilter: "blur(6px)",
+  };
+  const style = active
+    ? { ...baseStyle, borderColor: "rgba(155,127,224,0.6)", color: "#FFFFFF", background: "rgba(155,127,224,0.12)", boxShadow: "0 0 24px rgba(155,127,224,0.25)" }
+    : { ...baseStyle, borderColor: "rgba(255,255,255,0.08)", color: "#E5DEF5" };
+
+  return (
+    <button onClick={onClick} style={style}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.borderColor = "rgba(155,127,224,0.4)"; }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}
+    >
+      <div style={{ flexShrink: 0 }}>
+        <IconComp style={{ width: 20, height: 20 }} />
+      </div>
+      <span style={{ fontWeight: 500, fontSize: "14px", letterSpacing: "0.02em" }}>{label}</span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RECORD BUTTON (signature element)
+// ---------------------------------------------------------------------------
+
+function RecordButton({ recording, connected, onClick }) {
+  const label = recording ? "Recording" : connected ? "Start recording" : "Tap to connect";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "14px" }}>
+      <button onClick={onClick} aria-label={label} style={{
+        position: "relative", width: "92px", height: "92px", borderRadius: "50%",
+        border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+        background: recording ? "rgba(224,107,107,0.15)" : "rgba(155,127,224,0.15)",
+        boxShadow: recording
+          ? "0 0 0 1px rgba(224,107,107,0.4), 0 0 36px rgba(224,107,107,0.35)"
+          : "0 0 0 1px rgba(155,127,224,0.4), 0 0 36px rgba(155,127,224,0.3)",
+        transition: "all 0.4s",
+        animation: recording ? "pulseRed 1.6s ease-in-out infinite" : "none",
+      }}>
+        <div style={{
+          width: recording ? "28px" : "36px",
+          height: recording ? "28px" : "36px",
+          borderRadius: recording ? "8px" : "50%",
+          background: recording ? "#E06B6B" : "#9B7FE0",
+          boxShadow: recording ? "0 0 20px rgba(224,107,107,0.6)" : "0 0 20px rgba(155,127,224,0.6)",
+          transition: "all 0.4s",
+        }} />
+        {recording && (
+          <div style={{
+            position: "absolute", inset: "-6px", borderRadius: "50%",
+            border: "1px solid rgba(224,107,107,0.4)",
+            animation: "ringExpand 2.4s ease-out infinite",
+          }} />
+        )}
+      </button>
+      <span style={{ fontSize: "13px", fontWeight: 500, color: "#C9BEDF", letterSpacing: "0.04em" }}>
+        {label}
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SEARCH CONSOLE
+// ---------------------------------------------------------------------------
+
+function SearchConsole({ query, setQuery, results }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ position: "relative" }}>
+        <Icon.Search style={{ position: "absolute", left: "16px", top: "50%", transform: "translateY(-50%)", width: 18, height: 18, color: "#8478A0" }} />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search recorded conversations..."
+          style={{
+            width: "100%", borderRadius: "16px", border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.03)", backdropFilter: "blur(6px)",
+            paddingLeft: "44px", paddingRight: "16px", paddingTop: "14px", paddingBottom: "14px",
+            fontSize: "14px", color: "#FFFFFF", outline: "none", fontFamily: "inherit",
+          }}
+          onFocus={(e) => { e.target.style.borderColor = "rgba(155,127,224,0.6)"; e.target.style.boxShadow = "0 0 0 3px rgba(155,127,224,0.15)"; }}
+          onBlur={(e) => { e.target.style.borderColor = "rgba(255,255,255,0.08)"; e.target.style.boxShadow = "none"; }}
+        />
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        {results.length === 0 && (
+          <div style={{ borderRadius: "16px", border: "1px dashed rgba(255,255,255,0.12)", padding: "24px", textAlign: "center", fontSize: "14px", color: "#8478A0" }}>
+            No conversations match "{query}".
+          </div>
+        )}
+        {results.map((c) => (
+          <div key={c.id} style={{ borderRadius: "16px", border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.03)", backdropFilter: "blur(6px)", padding: "16px", cursor: "pointer", transition: "border-color 0.2s" }}
+            onMouseEnter={(e) => e.currentTarget.style.borderColor = "rgba(155,127,224,0.4)"}
+            onMouseLeave={(e) => e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", flexShrink: 0, backgroundColor: TONE_GLOW[c.tone], boxShadow: `0 0 8px ${TONE_GLOW[c.tone]}` }} />
+                  <h3 style={{ fontWeight: 500, color: "#FFFFFF", fontSize: "14px", margin: 0 }}>{c.title}</h3>
+                </div>
+                <p style={{ fontSize: "12px", color: "#8C7FA8", margin: 0 }}>{c.date} · {c.room}</p>
+                <p style={{ fontSize: "14px", color: "#B6ABCE", lineHeight: 1.4, marginTop: "4px", margin: 0 }}>{c.snippet}</p>
+              </div>
+              <span style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "999px", background: "rgba(155,127,224,0.12)", color: "#C9B8F0", border: "1px solid rgba(155,127,224,0.25)", flexShrink: 0 }}>
+                {c.theme}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PRIVACY STRIP
+// ---------------------------------------------------------------------------
+
+function PrivacyStrip() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ borderRadius: "16px", border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.03)", backdropFilter: "blur(6px)" }}>
+      <button onClick={() => setOpen((o) => !o)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px", textAlign: "left", background: "none", border: "none", cursor: "pointer", color: "inherit", fontFamily: "inherit" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <Icon.ShieldCheck style={{ width: 16, height: 16, color: "#7FC7E0" }} />
+          <span style={{ fontSize: "14px", color: "#E5DEF5" }}>Who can hear this, and what's stored</span>
+        </div>
+        <span style={{ fontSize: "12px", color: "#8478A0" }}>{open ? "Hide" : "Show"}</span>
+      </button>
+      {open && (
+        <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px", color: "#B6ABCE", lineHeight: 1.5 }}>
+          <p style={{ margin: 0 }}>This is not a therapist and doesn't diagnose anything — it reflects patterns back to you.</p>
+          <p style={{ margin: 0 }}>Raw audio is processed locally and discarded after transcription. Only text and tone tags are stored, encrypted, on this device.</p>
+          <p style={{ margin: 0 }}>The record button glows whenever a mic is capturing audio. Anyone in the room can say "pause listening" to mute it.</p>
+          <p style={{ margin: 0 }}>Each household member can only search their own conversations. Anyone can delete their history below.</p>
+        </div>
+      )}
+      <div style={{ padding: "0 16px 16px" }}>
+        <button style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#E0B0C0", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+          <Icon.Trash2 style={{ width: 13, height: 13 }} />
+          Clear my recorded history
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// LIVE TRANSCRIPT — shows the 5 most recently heard words while recording
+// ---------------------------------------------------------------------------
+
+const MOCK_WORD_STREAM =
+  "so I was thinking about the weekend and maybe we could just stay in and relax for once instead of running around the whole time".split(" ");
+
+function LiveTranscript({ recording }) {
+  const [words, setWords] = useState([]);
+  const [micError, setMicError] = useState(null);
+  const recognitionRef = React.useRef(null);
+  const mockIndexRef = React.useRef(0);
+  const mockTimerRef = React.useRef(null);
+
+  const pushWords = (text) => {
+    const newWords = text.trim().split(/\s+/).filter(Boolean);
+    if (newWords.length === 0) return;
+    setWords((prev) => [...prev, ...newWords].slice(-5));
+  };
+
+  React.useEffect(() => {
+    if (!recording) {
+      setWords([]);
+      setMicError(null);
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      }
+      if (mockTimerRef.current) {
+        clearInterval(mockTimerRef.current);
+        mockTimerRef.current = null;
+      }
+      mockIndexRef.current = 0;
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+
+      recognition.onresult = (event) => {
+        let transcript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript + " ";
+        }
+        pushWords(transcript);
+      };
+
+      recognition.onerror = (event) => {
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          setMicError("Microphone access denied — using sample audio instead.");
+          startMockStream();
+        }
+      };
+
+      recognition.onend = () => {
+        if (recognitionRef.current === recognition) {
+          try { recognition.start(); } catch (e) {}
+        }
+      };
+
+      try {
+        recognition.start();
+        recognitionRef.current = recognition;
+      } catch (e) {
+        startMockStream();
+      }
+    } else {
+      setMicError("Live transcription isn't supported in this browser — showing sample audio.");
+      startMockStream();
+    }
+
+    function startMockStream() {
+      mockTimerRef.current = setInterval(() => {
+        const w = MOCK_WORD_STREAM[mockIndexRef.current % MOCK_WORD_STREAM.length];
+        mockIndexRef.current += 1;
+        setWords((prev) => [...prev, w].slice(-5));
+      }, 420);
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      }
+      if (mockTimerRef.current) {
+        clearInterval(mockTimerRef.current);
+        mockTimerRef.current = null;
+      }
+    };
+  }, [recording]);
+
+  if (!recording) return null;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px", minHeight: "44px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "8px", maxWidth: "320px" }}>
+        {words.length === 0 && (
+          <span style={{ fontSize: "13px", color: "#6F6285" }}>Listening...</span>
+        )}
+        {words.map((w, i) => (
+          <span key={i} style={{
+            fontSize: "14px", color: "#E5DEF5",
+            opacity: 0.35 + (i / Math.max(words.length - 1, 1)) * 0.65,
+            animation: "fadeInUp 0.35s ease-out",
+          }}>
+            {w}
+          </span>
+        ))}
+      </div>
+      {micError && (
+        <span style={{ fontSize: "11px", color: "#8478A0", textAlign: "center", maxWidth: "300px" }}>{micError}</span>
+      )}
+    </div>
+  );
+}
+
+function App() {
+  const [connected, setConnected] = useState(false);
+  const [connectedDevices, setConnectedDevices] = useState([]);
+  const [recording, setRecording] = useState(false);
+  const [showSubscription, setShowSubscription] = useState(false);
+  const [showLearn, setShowLearn] = useState(false);
+  const [showBluetooth, setShowBluetooth] = useState(false);
+  const [showAsk, setShowAsk] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const results = MOCK_CONVERSATIONS.filter(
+    (c) =>
+      c.title.toLowerCase().includes(query.toLowerCase()) ||
+      c.theme.toLowerCase().includes(query.toLowerCase()) ||
+      c.snippet.toLowerCase().includes(query.toLowerCase())
+  );
+
+  const handleRecordClick = () => {
+    if (!connected) {
+      setShowBluetooth(true);
+      return;
+    }
+    setRecording((r) => !r);
+  };
+
+  const handleConnect = (device) => {
+    setConnected(true);
+    setConnectedDevices((prev) => prev.some((d) => d.id === device.id) ? prev : [...prev, device]);
+    setShowBluetooth(false);
+    setRecording(true);
+  };
+
+  const handleUnpair = (deviceId) => {
+    setConnectedDevices((prev) => {
+      const next = prev.filter((d) => d.id !== deviceId);
+      if (next.length === 0) {
+        setConnected(false);
+        setRecording(false);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div style={{
+      position: "relative", minHeight: "100vh", overflow: "hidden",
+      background: "#06050A",
+      fontFamily: "system-ui, -apple-system, sans-serif",
+    }}>
+      {/* Ambient purple orb glows in background */}
+      <div style={{
+        position: "absolute", top: "-220px", left: "50%", transform: "translateX(-50%)",
+        width: "900px", height: "900px", borderRadius: "50%",
+        background: "radial-gradient(circle, rgba(155,127,224,0.35) 0%, rgba(107,78,158,0.18) 40%, transparent 72%)",
+        filter: "blur(50px)", pointerEvents: "none",
+        animation: "driftGlow1 14s ease-in-out infinite",
+      }} />
+      <div style={{
+        position: "absolute", bottom: "-300px", left: "50%", transform: "translateX(-50%)",
+        width: "760px", height: "760px", borderRadius: "50%",
+        background: "radial-gradient(circle, rgba(123,92,179,0.25) 0%, transparent 70%)",
+        filter: "blur(55px)", pointerEvents: "none",
+        animation: "driftGlow2 17s ease-in-out infinite",
+      }} />
+
+      <div style={{ position: "relative", zIndex: 1, maxWidth: "440px", margin: "0 auto", padding: "32px 20px", display: "flex", flexDirection: "column", gap: "28px" }}>
+
+        <header style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: "8px" }}>
+          <h1 style={{
+            fontSize: "26px", fontWeight: 600, letterSpacing: "0.08em",
+            margin: 0, color: "rgba(238,232,250,0.9)",
+            textShadow: "0 0 22px rgba(155,127,224,0.65), 0 0 48px rgba(155,127,224,0.3)",
+          }}>
+            Reflect AI
+          </h1>
+        </header>
+
+        <div style={{ display: "flex", justifyContent: "center", padding: "12px 0" }}>
+          <RecordButton recording={recording} connected={connected} onClick={handleRecordClick} />
+        </div>
+
+        <LiveTranscript recording={recording} />
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <ControlButton
+            icon={Icon.MessageCircle}
+            label="Ask a question"
+            onClick={() => setShowAsk(true)}
+            active={false}
+          />
+          <ControlButton
+            icon={Icon.Sparkles}
+            label="Learn from yourself"
+            onClick={() => setShowLearn(true)}
+            active={false}
+          />
+        </div>
+
+        <div style={{ height: "1px", background: "linear-gradient(to right, transparent, rgba(255,255,255,0.12), transparent)" }} />
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <h2 style={{ fontSize: "14px", fontWeight: 500, color: "#E5DEF5", letterSpacing: "0.02em", padding: "0 4px", margin: 0 }}>Recorded conversations</h2>
+          <SearchConsole query={query} setQuery={setQuery} results={results} />
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          <button onClick={() => setShowSubscription(true)} style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
+            borderRadius: "16px", border: "1px solid rgba(155,127,224,0.4)",
+            background: "rgba(155,127,224,0.1)", backdropFilter: "blur(6px)",
+            color: "#FFFFFF", fontSize: "14px", fontWeight: 500, padding: "16px",
+            cursor: "pointer", fontFamily: "inherit", boxShadow: "0 0 20px rgba(155,127,224,0.15)",
+          }}>
+            <Icon.Crown style={{ width: 18, height: 18, color: "#C9A8F0" }} />
+            Manage subscription
+          </button>
+
+          <button style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
+            borderRadius: "16px", border: "1px solid rgba(255,255,255,0.1)",
+            background: "rgba(255,255,255,0.04)", backdropFilter: "blur(6px)",
+            color: "#E5DEF5", fontSize: "14px", fontWeight: 500, padding: "16px",
+            cursor: "pointer", fontFamily: "inherit",
+          }}>
+            <Icon.Google style={{ width: 18, height: 18 }} />
+            Sign in with Google
+          </button>
+        </div>
+
+        <PrivacyStrip />
+      </div>
+
+      {showBluetooth && <BluetoothPanel onClose={() => setShowBluetooth(false)} onConnect={handleConnect} />}
+      {showLearn && <LearnPanel onClose={() => setShowLearn(false)} />}
+      {showSubscription && <SubscriptionPanel onClose={() => setShowSubscription(false)} connectedDevices={connectedDevices} onUnpair={handleUnpair} />}
+      {showAsk && <AskQuestionPanel onClose={() => setShowAsk(false)} />}
+
+      <style>{`
+        @keyframes ringExpand {
+          0% { transform: scale(1); opacity: 0.7; }
+          100% { transform: scale(1.6); opacity: 0; }
+        }
+        @keyframes pulseRed {
+          0%, 100% { box-shadow: 0 0 0 1px rgba(224,107,107,0.4), 0 0 36px rgba(224,107,107,0.35); }
+          50% { box-shadow: 0 0 0 1px rgba(224,107,107,0.6), 0 0 56px rgba(224,107,107,0.55); }
+        }
+        @keyframes driftGlow1 {
+          0%   { transform: translate(-50%, 0) scale(1); }
+          25%  { transform: translate(-25%, 120px) scale(1.12); }
+          50%  { transform: translate(-65%, 220px) scale(0.92); }
+          75%  { transform: translate(-35%, 100px) scale(1.08); }
+          100% { transform: translate(-50%, 0) scale(1); }
+        }
+        @keyframes driftGlow2 {
+          0%   { transform: translate(-50%, 0) scale(1); }
+          25%  { transform: translate(-75%, -120px) scale(1.1); }
+          50%  { transform: translate(-35%, -220px) scale(0.9); }
+          75%  { transform: translate(-65%, -100px) scale(1.06); }
+          100% { transform: translate(-50%, 0) scale(1); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
