@@ -194,6 +194,7 @@ const SCAN_DEVICES = [
 function BluetoothPanel({ onClose, onConnect }) {
   const [foundIds, setFoundIds] = useState([]);
   const [scanning, setScanning] = useState(true);
+  const [micStatus, setMicStatus] = useState("idle"); // idle | requesting | denied
 
   React.useEffect(() => {
     const timers = SCAN_DEVICES.map((d) =>
@@ -204,6 +205,18 @@ function BluetoothPanel({ onClose, onConnect }) {
   }, []);
 
   const found = SCAN_DEVICES.filter((d) => foundIds.includes(d.id));
+
+  const handlePhoneConnect = async () => {
+    setMicStatus("requesting");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Keep the stream alive so permission stays granted, then connect
+      stream.getTracks().forEach((t) => t.stop());
+      onConnect({ id: "this-phone", name: "This phone's microphone", kind: "phone", isPhone: true });
+    } catch (err) {
+      setMicStatus("denied");
+    }
+  };
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", padding: "16px" }}>
@@ -226,22 +239,31 @@ function BluetoothPanel({ onClose, onConnect }) {
           Reflect Mic for the best experience.
         </p>
 
-        <button onClick={() => onConnect({ id: "this-phone", name: "This phone's microphone", kind: "phone", isPhone: true })} style={{
+        <button onClick={handlePhoneConnect} disabled={micStatus === "requesting"} style={{
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
           borderRadius: "14px", border: "1px solid rgba(155,127,224,0.4)", background: "rgba(155,127,224,0.1)",
-          padding: "14px 16px", color: "#F3EEFF", fontSize: "14px", cursor: "pointer",
-          fontFamily: "inherit", textAlign: "left", marginBottom: "16px",
+          padding: "14px 16px", color: "#F3EEFF", fontSize: "14px", cursor: micStatus === "requesting" ? "default" : "pointer",
+          fontFamily: "inherit", textAlign: "left", marginBottom: micStatus === "denied" ? "8px" : "16px",
           boxShadow: "0 0 20px rgba(155,127,224,0.12)",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <Icon.Smartphone style={{ width: 18, height: 18, color: "#C9A8F0" }} />
             <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
               <span>Use this phone's microphone</span>
-              <span style={{ fontSize: "11px", color: "#8478A0" }}>For testing — uses browser mic access</span>
+              <span style={{ fontSize: "11px", color: "#8478A0" }}>
+                {micStatus === "requesting" ? "Requesting mic access..." : "Tap to request mic permission"}
+              </span>
             </div>
           </div>
-          <span style={{ fontSize: "12px", color: "#9B7FE0" }}>Connect</span>
+          <span style={{ fontSize: "12px", color: "#9B7FE0" }}>
+            {micStatus === "requesting" ? "..." : "Connect"}
+          </span>
         </button>
+        {micStatus === "denied" && (
+          <p style={{ fontSize: "12px", color: "#E08B6E", marginBottom: "16px", lineHeight: 1.5 }}>
+            Mic permission denied. Check your browser settings and allow microphone access for this site, then try again.
+          </p>
+        )}
 
         <div style={{ height: "1px", background: "rgba(255,255,255,0.06)", marginBottom: "16px" }} />
 
@@ -651,6 +673,7 @@ function LiveTranscript({ recording }) {
   const [words, setWords] = useState([]);
   const [micError, setMicError] = useState(null);
   const recognitionRef = React.useRef(null);
+  const activeRef = React.useRef(false);
   const mockIndexRef = React.useRef(0);
   const mockTimerRef = React.useRef(null);
 
@@ -662,10 +685,11 @@ function LiveTranscript({ recording }) {
 
   React.useEffect(() => {
     if (!recording) {
+      activeRef.current = false;
       setWords([]);
       setMicError(null);
       if (recognitionRef.current) {
-        recognitionRef.current.stop();
+        try { recognitionRef.current.onend = null; recognitionRef.current.stop(); } catch(e) {}
         recognitionRef.current = null;
       }
       if (mockTimerRef.current) {
@@ -676,41 +700,50 @@ function LiveTranscript({ recording }) {
       return;
     }
 
+    activeRef.current = true;
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = "en-US";
+      const startRecognition = () => {
+        if (!activeRef.current) return;
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false; // more reliable on mobile
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+        recognition.maxAlternatives = 1;
 
-      recognition.onresult = (event) => {
-        let transcript = "";
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript + " ";
+        recognition.onresult = (event) => {
+          let transcript = "";
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            transcript += event.results[i][0].transcript + " ";
+          }
+          pushWords(transcript);
+        };
+
+        recognition.onerror = (event) => {
+          if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+            activeRef.current = false;
+            setMicError("Microphone access denied — check browser permissions and reload.");
+            startMockStream();
+          }
+          // other errors: restart will happen via onend
+        };
+
+        recognition.onend = () => {
+          if (activeRef.current) {
+            setTimeout(startRecognition, 150);
+          }
+        };
+
+        try {
+          recognition.start();
+          recognitionRef.current = recognition;
+        } catch (e) {
+          if (activeRef.current) setTimeout(startRecognition, 500);
         }
-        pushWords(transcript);
       };
 
-      recognition.onerror = (event) => {
-        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-          setMicError("Microphone access denied — using sample audio instead.");
-          startMockStream();
-        }
-      };
-
-      recognition.onend = () => {
-        if (recognitionRef.current === recognition) {
-          try { recognition.start(); } catch (e) {}
-        }
-      };
-
-      try {
-        recognition.start();
-        recognitionRef.current = recognition;
-      } catch (e) {
-        startMockStream();
-      }
+      startRecognition();
     } else {
       setMicError("Live transcription isn't supported in this browser — showing sample audio.");
       startMockStream();
@@ -725,9 +758,9 @@ function LiveTranscript({ recording }) {
     }
 
     return () => {
+      activeRef.current = false;
       if (recognitionRef.current) {
-        recognitionRef.current.onend = null;
-        recognitionRef.current.stop();
+        try { recognitionRef.current.onend = null; recognitionRef.current.stop(); } catch(e) {}
         recognitionRef.current = null;
       }
       if (mockTimerRef.current) {
