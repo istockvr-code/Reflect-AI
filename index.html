@@ -374,22 +374,34 @@ function AskQuestionPanel({ onClose, conversations }) {
     const text = input.trim();
     if (!text) return;
     let reply;
-    const real = (conversations || []).filter((c) => c.transcript);
+    const real = (conversations || []).filter((c) => c.transcript && !c.live);
+
     if (real.length === 0) {
-      reply = "No real conversations recorded yet — start a recording session and I'll be able to reflect on what was said.";
+      reply = "No conversations recorded yet. Start a recording session and I'll be able to reflect on what was said.";
     } else {
       const lower = text.toLowerCase();
-      const matches = real.filter((c) =>
-        c.transcript.toLowerCase().includes(lower) ||
-        c.title.toLowerCase().includes(lower)
-      );
-      if (matches.length > 0) {
-        const m = matches[0];
-        reply = `I found something from "${m.title}" (${m.date}): "${m.transcript.slice(0, 180)}..."`;
+      const keywords = lower.split(/\s+/).filter((w) => w.length > 3);
+
+      // Score each conversation by keyword hits in transcript
+      const scored = real.map((c) => {
+        const t = (c.transcript || "").toLowerCase();
+        const score = keywords.reduce((n, kw) => n + (t.includes(kw) ? 1 : 0), 0);
+        return { c, score };
+      }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score);
+
+      if (scored.length > 0) {
+        const { c } = scored[0];
+        // Find the most relevant sentence
+        const sentences = c.transcript.split(/[.!?]+/).map((s) => s.trim()).filter(Boolean);
+        const best = sentences.find((s) =>
+          keywords.some((kw) => s.toLowerCase().includes(kw))
+        ) || sentences[0];
+        reply = `From your recording "${c.title}" (${c.date}):\n\n"${best}"\n\nFull transcript: ${c.transcript.slice(0, 300)}${c.transcript.length > 300 ? "..." : ""}`;
       } else {
-        // Summarise general patterns
-        const titles = real.slice(0, 3).map((c) => `"${c.title}"`).join(", ");
-        reply = `I didn't find an exact match, but your recent recordings include: ${titles}. Try asking about something specific you said.`;
+        // No keyword match — summarize what's there
+        const allText = real.map((c) => c.transcript).join(" ");
+        const preview = allText.slice(0, 400);
+        reply = `I didn't find that specific topic, but here's what I have from your recordings:\n\n"${preview}${allText.length > 400 ? "..." : ""}"`;
       }
     }
     setMessages((m) => [...m, { from: "user", text }, { from: "ai", text: reply }]);
@@ -662,21 +674,31 @@ function SearchConsole({ query, setQuery, results }) {
           </div>
         )}
         {results.map((c) => (
-          <div key={c.id} style={{ borderRadius: "16px", border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.03)", backdropFilter: "blur(6px)", padding: "16px", cursor: "pointer", transition: "border-color 0.2s" }}
-            onMouseEnter={(e) => e.currentTarget.style.borderColor = "rgba(155,127,224,0.4)"}
-            onMouseLeave={(e) => e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"}
+          <div key={c.id} style={{
+            borderRadius: "16px",
+            border: c.live ? "1px solid rgba(224,107,107,0.5)" : "1px solid rgba(255,255,255,0.06)",
+            background: c.live ? "rgba(224,107,107,0.06)" : "rgba(255,255,255,0.03)",
+            backdropFilter: "blur(6px)", padding: "16px", cursor: "pointer", transition: "border-color 0.2s"
+          }}
+            onMouseEnter={(e) => { if (!c.live) e.currentTarget.style.borderColor = "rgba(155,127,224,0.4)"; }}
+            onMouseLeave={(e) => { if (!c.live) e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"; }}
           >
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", flexShrink: 0, backgroundColor: TONE_GLOW[c.tone], boxShadow: `0 0 8px ${TONE_GLOW[c.tone]}` }} />
+                  <span style={{
+                    width: "6px", height: "6px", borderRadius: "50%", flexShrink: 0,
+                    backgroundColor: c.live ? "#E06B6B" : (TONE_GLOW[c.tone] || "#9B7FE0"),
+                    boxShadow: `0 0 8px ${c.live ? "#E06B6B" : (TONE_GLOW[c.tone] || "#9B7FE0")}`,
+                    animation: c.live ? "iconPulse 1.2s ease-in-out infinite" : "none",
+                  }} />
                   <h3 style={{ fontWeight: 500, color: "#FFFFFF", fontSize: "14px", margin: 0 }}>{c.title}</h3>
                 </div>
                 <p style={{ fontSize: "12px", color: "#8C7FA8", margin: 0 }}>{c.date} · {c.room}</p>
                 <p style={{ fontSize: "14px", color: "#B6ABCE", lineHeight: 1.4, marginTop: "4px", margin: 0 }}>{c.snippet}</p>
               </div>
-              <span style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "999px", background: "rgba(155,127,224,0.12)", color: "#C9B8F0", border: "1px solid rgba(155,127,224,0.25)", flexShrink: 0 }}>
-                {c.theme}
+              <span style={{ fontSize: "12px", padding: "4px 10px", borderRadius: "999px", background: c.live ? "rgba(224,107,107,0.15)" : "rgba(155,127,224,0.12)", color: c.live ? "#E09090" : "#C9B8F0", border: c.live ? "1px solid rgba(224,107,107,0.3)" : "1px solid rgba(155,127,224,0.25)", flexShrink: 0 }}>
+                {c.live ? "live" : c.theme}
               </span>
             </div>
           </div>
@@ -867,6 +889,7 @@ function App() {
   const [query, setQuery] = useState("");
   const [conversations, setConversations] = useState(() => loadConversations());
   const currentTranscriptRef = React.useRef("");
+  const currentSessionIdRef = React.useRef(null);
   const activeDeviceRef = React.useRef(null);
 
   // Use real conversations if any exist, otherwise show mock examples
@@ -876,34 +899,83 @@ function App() {
     (c) =>
       c.title.toLowerCase().includes(query.toLowerCase()) ||
       c.theme.toLowerCase().includes(query.toLowerCase()) ||
-      c.snippet.toLowerCase().includes(query.toLowerCase())
+      (c.snippet || "").toLowerCase().includes(query.toLowerCase()) ||
+      (c.transcript || "").toLowerCase().includes(query.toLowerCase())
   );
 
-  const handleChunk = (text) => {
-    currentTranscriptRef.current += (currentTranscriptRef.current ? " " : "") + text;
+  // Start a new live session in the list
+  const startSession = (device) => {
+    const id = Date.now();
+    currentSessionIdRef.current = id;
+    currentTranscriptRef.current = "";
+    const now = new Date();
+    const session = {
+      id,
+      title: "Recording...",
+      date: now.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+      room: device?.name || "Phone Microphone",
+      theme: "recorded",
+      tone: "calm",
+      snippet: "Listening...",
+      transcript: "",
+      live: true,
+    };
+    setConversations((prev) => [session, ...prev]);
   };
 
-  const saveCurrentSession = () => {
+  // Called on every finalized speech chunk — updates the live session immediately
+  const handleChunk = (text) => {
+    currentTranscriptRef.current += (currentTranscriptRef.current ? " " : "") + text;
+    const transcript = currentTranscriptRef.current;
+    const words = transcript.split(/\s+/);
+    const title = words.slice(0, 6).join(" ") + (words.length > 6 ? "..." : "");
+    const snippet = "..." + transcript.slice(0, 140);
+
+    setConversations((prev) => {
+      const next = prev.map((c) =>
+        c.id === currentSessionIdRef.current
+          ? { ...c, title, snippet, transcript, live: true }
+          : c
+      );
+      // Persist completed sessions only (not the live one)
+      saveConversations(next.filter((c) => !c.live));
+      return next;
+    });
+  };
+
+  // Finalize the live session when recording stops
+  const finalizeSession = () => {
     const transcript = currentTranscriptRef.current.trim();
     currentTranscriptRef.current = "";
-    if (!transcript) return;
-    const deviceName = activeDeviceRef.current?.name || "Phone Microphone";
-    const conv = makeConversation(transcript, deviceName);
-    if (!conv) return;
+    const id = currentSessionIdRef.current;
+    currentSessionIdRef.current = null;
+
     setConversations((prev) => {
-      const next = [conv, ...prev];
-      saveConversations(next);
+      const next = prev
+        .map((c) => {
+          if (c.id !== id) return c;
+          if (!transcript) return null; // drop empty sessions
+          const lower = transcript.toLowerCase();
+          const tone = /angry|upset|frustrat|annoyed|stressed|tense/.test(lower) ? "tense"
+            : /happy|great|love|wonderful|excited|amazing/.test(lower) ? "warm"
+            : "calm";
+          return { ...c, tone, live: false };
+        })
+        .filter(Boolean);
+      saveConversations(next.filter((c) => !c.live));
       return next;
     });
   };
 
   const handleRecordClick = () => {
-    if (!connected) {
-      setShowBluetooth(true);
-      return;
+    if (!connected) { setShowBluetooth(true); return; }
+    if (recording) {
+      finalizeSession();
+      setRecording(false);
+    } else {
+      startSession(activeDeviceRef.current);
+      setRecording(true);
     }
-    if (recording) saveCurrentSession();
-    setRecording((r) => !r);
   };
 
   const handleConnect = (device) => {
@@ -911,12 +983,12 @@ function App() {
     setConnected(true);
     setConnectedDevices((prev) => prev.some((d) => d.id === device.id) ? prev : [...prev, device]);
     setShowBluetooth(false);
-    currentTranscriptRef.current = "";
+    startSession(device);
     setRecording(true);
   };
 
   const handleUnpair = (deviceId) => {
-    if (recording) saveCurrentSession();
+    if (recording) finalizeSession();
     setConnectedDevices((prev) => {
       const next = prev.filter((d) => d.id !== deviceId);
       if (next.length === 0) {
