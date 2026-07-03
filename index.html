@@ -20,10 +20,10 @@
 <body>
 
 <h1>Privacy Policy</h1>
-<p class="updated">Last updated: June 2026</p>
+<p class="updated">Last updated: July 2026</p>
 
 <div class="highlight">
-  <strong>The short version:</strong> Audio never leaves your device. Only text transcripts are sent to our servers for analysis. We never sell your data. You can delete everything at any time.
+  <strong>The short version:</strong> Audio never leaves your device. Only text transcripts leave your phone — securely, and only to power the coaching features (stored in Google Firebase; analyzed by Anthropic's Claude). We never sell your data, and you can delete your account and all associated data at any time.
 </div>
 
 <h2>1. Who We Are</h2>
@@ -35,13 +35,13 @@
 <p>The Reflect app captures audio through your device's microphone while monitoring is active. <strong>Raw audio is processed entirely on your device using on-device AI models and is never transmitted to our servers.</strong> Audio is discarded immediately after transcription.</p>
 
 <h2>Text Transcripts</h2>
-<p>After on-device transcription, text transcripts (not audio) are sent to our servers for communication pattern analysis. Transcripts are:</p>
+<p>After on-device transcription, <strong>text transcripts (never audio)</strong> may leave your device to power the coaching features. Transcripts are:</p>
 <ul>
-  <li>Encrypted in transit (TLS 1.3)</li>
-  <li>Stored in encrypted form on our servers</li>
-  <li>Retained for a maximum of 90 days</li>
-  <li>Never sold to third parties</li>
-  <li>Never used to train AI models</li>
+  <li>Sent to <strong>Anthropic (Claude AI)</strong> to generate your insights and coaching responses</li>
+  <li>Stored in our cloud database (<strong>Google Firebase / Firestore</strong>) so your history stays in sync across your devices</li>
+  <li>Encrypted in transit (TLS) and encrypted at rest</li>
+  <li>Retained no longer than 90 days, and removed when you delete your account</li>
+  <li>Never sold to third parties, and never used to train AI models</li>
 </ul>
 
 <h2>Account Information</h2>
@@ -76,18 +76,22 @@
 
 <h2>7. Data Retention</h2>
 <ul>
-  <li>Text transcripts: deleted after 90 days</li>
-  <li>Pattern summaries (compressed history): retained while account is active</li>
-  <li>Account data: deleted within 30 days of account deletion request</li>
+  <li>Text transcripts: retained no longer than 90 days, and removed when you delete your account</li>
+  <li>Insights and pattern summaries: kept while your account is active; removed when you delete your account</li>
+  <li>Account data: in-app deletion is immediate; email requests are completed within 30 days</li>
+  <li><strong>Free-trial record:</strong> after deletion we retain only your email address and the date your free trial started, to prevent the same email from repeatedly claiming a new free trial. This holds no conversation content.</li>
+  <li><strong>Billing records</strong> held by Google Play may be retained by Google to meet its legal and tax obligations. Reflect never stores your card details.</li>
 </ul>
 
 <h2>8. Your Rights</h2>
 <p>You may at any time:</p>
 <ul>
   <li><strong>Export your data</strong> — download all transcripts and insights as JSON via Settings → Export My Data</li>
-  <li><strong>Delete your account</strong> — permanently deletes all data, transcripts, and insights via Settings → Delete Account</li>
+  <li><strong>Delete your account and data</strong> — permanently erases your account, transcripts, and insights via Settings → Manage Subscription &amp; Account → Delete Account (immediate)</li>
   <li><strong>Pause monitoring</strong> — one tap from the home screen or notification bar</li>
 </ul>
+
+<p>Full instructions, including how to request deletion by email if you can no longer access the app, are on our <a href="https://istockvr-code.github.io/Reflect-AI/delete-account.html">Account &amp; Data Deletion page</a>.</p>
 
 <p>If you are in the European Union or United Kingdom, you have additional rights under GDPR/UK GDPR including the right to access, rectification, erasure, and portability. Contact us at reflectaisupport@gmail.com.</p>
 
@@ -100,7 +104,7 @@
 <p>We do not use advertising networks. We do not share your data with data brokers.</p>
 
 <h2>10. Crisis Detection</h2>
-<p>Reflect includes automated detection of language that may indicate a mental health or safety crisis. If such language is detected, the app will surface crisis support resources including the 988 Suicide & Crisis Lifeline and the National Domestic Violence Hotline. Crisis flags are logged internally (without transcript content) for safety audit purposes.</p>
+<p>Reflect includes automated, <strong>on-device</strong> detection of language that may indicate a mental health or safety crisis. This detection runs on your phone. If such language is detected, the app surfaces crisis support resources including the 988 Suicide &amp; Crisis Lifeline and the National Domestic Violence Hotline (1-800-799-7233).</p>
 
 <h2>11. Security</h2>
 <ul>
